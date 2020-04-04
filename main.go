@@ -1,115 +1,114 @@
 package main
 
 import (
-	"bufio"
+	"flag"
 	"fmt"
+	"github.com/martinomburajr/echoserver/server"
 	"log"
-	"math/rand"
-	"net"
 	"os"
-	"time"
-	"unsafe"
+	"strings"
 )
+
+// echo --listener --network="tcp" --address="localhost:8080" || echo -l -n="tcp" -a="localhost:8080"
+// Creates a TCP listener on the supplied address
+
+// echo --dialer --network="tcp" --address="localhost:8080" || echo -d -n="tcp" -a="localhost:8080,localhost:8081"
+// Creates a TCP dialer on the supplied address
+
+// echo --network="tcp" --listenerAddress="" --dialerAddress=""
+
+func cliParser() (dialer *server.EchoDialer, listener *server.EchoListener, err error) {
+	network := flag.String("network", "tcp", "Select the network either 'tcp' or 'udp'")
+	isListener := flag.Bool("listener", false, "Select whether the server is a listener")
+	isDialer := flag.Bool("dialer", false, "Select whether the server is a dialer")
+	listenerAddress := flag.String("listenerAddress", "", "The address to listen to, "+
+		"this should include the port e.g. 127.0.0.1:8080")
+	dialerAddresses := flag.String("dialerAddress", "", "The addresses to dial to as a comma-separated list")
+	dialInterval := flag.Int("dialInterval", 3000, "The dialer dial interval in milliseconds, "+
+		"value should be greater than 10 and less than 60000")
+
+	flag.Parse()
+	if *network == "" {
+		return nil, nil, fmt.Errorf("parser error: network flag cannot be empty")
+	}
+	if !*isListener && !*isDialer {
+		return nil, nil, fmt.Errorf("parser error: please use either --listener or --dialer")
+	}
+	if *isListener && *isDialer {
+		return nil, nil, fmt.Errorf("parser error: please use either --listener or --dialer")
+	}
+	if *isListener && !*isDialer {
+		if *listenerAddress == "" {
+			return nil,nil, fmt.Errorf("parser error: listener address cannot be empty")
+		}
+	}
+	if !*isListener && *isDialer {
+		if *dialerAddresses == "" {
+			return nil,nil, fmt.Errorf("parser error: dialer addresses cannot be empty, " +
+				"need at least one valid address e.g. 'localhost:8080', or multiple separated by comma 'localhost:8080," +
+				"127.0.0.2:7655'")
+		}
+	}
+	if *listenerAddress == "" && *dialerAddresses == "" {
+		return nil, nil,fmt.Errorf("parser error: listener and dialer addresses cannot be empty")
+	}
+	if *dialInterval < 1 {
+		return nil, nil,fmt.Errorf("dialInterval must be greater than 1 and less than 60000")
+	}
+	if *dialInterval > 60000 {
+		return nil,nil, fmt.Errorf("dialInterval must be greater than 1 and less than 60000")
+	}
+
+	logger := log.New(os.Stdout, "", log.Lshortfile)
+	errChan := make(chan error, 10)
+
+	if *isDialer {
+		splitDialerAddresses := strings.Split(*dialerAddresses, ",")
+		dialer = &server.EchoDialer{
+			Name:      "dialer",
+			ErrChan:   errChan,
+			Network:   *network,
+			Addresses: splitDialerAddresses,
+			Interval:  *dialInterval,
+			Logger:    logger,
+		}
+
+		return dialer, nil, nil
+	}
+	if *isListener {
+		listener = &server.EchoListener{
+			Name:    "listener",
+			Address: *listenerAddress,
+			Network: *network,
+			ErrChan: errChan,
+			Logger:  logger,
+		}
+
+		return nil, listener, nil
+	}
+
+	return nil, nil, nil
+}
 
 func main() {
-	fmt.Println("EchoServer - Set the DIALER_NETWORK, DIALER_ADDRESS, LISTENER_NETWORK, " +
-		"LISTENER_ADDRESS environment variables use this application")
-
-	dialerNetwork := os.Getenv("DIALER_NETWORK")
-	if dialerNetwork == "" {
-		log.Fatal("DIALER_NETWORK must be set")
-	}
-	dialerAddress := os.Getenv("DIALER_ADDRESS")
-	if dialerAddress == "" {
-		log.Fatal("DIALER_ADDRESS must be set")
-	}
-	listenerNetwork := os.Getenv("LISTENER_NETWORK")
-	if listenerNetwork == "" {
-		log.Fatal("LISTENER_NETWORK must be set")
-	}
-	listenerAddress := os.Getenv("LISTENER_ADDRESS")
-	if listenerAddress == "" {
-		log.Fatal("LISTENER_ADDRESS must be set")
-	}
-
-	errChan := make(chan error, 1)
-	go dialer(errChan, dialerNetwork, dialerAddress)
-	go listener(errChan, listenerNetwork, listenerAddress)
-
-	log.Fatal(<-errChan)
-}
-
-func dialer (errChan chan error, network, address string) {
-	const interval = 3
-	conn, err := net.Dial(network, address)
+	// Parsing CLI
+	dialer, listener, err := cliParser()
 	if err != nil {
-		errChan <- err
+		log.Fatal(err)
 	}
-	log.Printf("[dialer]\t - Dialing %s on network: %s\n", address, network)
-	counter := 1
-	for {
-		time.Sleep(time.Second * interval)
-		randomStr := RandString(6)
-
-		log.Printf("[dialer]\t - %s - Sending %s ==> %s", time.Now().Format(time.RFC3339), randomStr, conn.RemoteAddr())
-		dialerMsg := fmt.Sprintf("%s\n", randomStr)
-
-		connectionWriter := bufio.NewWriter(conn)
-		connectionWriter.Write([]byte(dialerMsg))
-		err := connectionWriter.Flush()
-		if err != nil {
-			errChan <- err
-		}
-		counter++
+	if dialer == nil && listener == nil {
+		log.Fatal(fmt.Errorf("parser error: dialer and listener cannot be both unselected"))
 	}
+
+	doneChan := make(chan bool, 1)
+	if dialer != nil {
+		go dialer.Setup()
+		log.Println(<-dialer.ErrChan)
+	}
+	if listener != nil {
+		go listener.Setup()
+		log.Println(<-listener.ErrChan)
+	}
+	<-doneChan
 }
 
-func listener (errChan chan error, network, address string) {
-	listen, err := net.Listen(network, address)
-	if err != nil {
-		errChan <- err
-	}
-	for {
-		conn, err := listen.Accept()
-		log.Printf("[listener]\t - Accepted Connection at %s from %s", conn.LocalAddr(), conn.RemoteAddr())
-		go func() {
-			for {
-
-				if err != nil {
-					errChan <- err
-				}
-				connReader := bufio.NewReader(conn)
-				line, _, _ := connReader.ReadLine()
-
-				log.Printf("[listener]\t - Read %s", line)
-			}
-		}()
-	}
-}
-
-// Rand String generator from https://stackoverflow.com/a/31832326
-const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-const (
-	letterIdxBits = 6                    // 6 bits to represent a letter index
-	letterIdxMask = 1<<letterIdxBits - 1 // All 1-bits, as many as letterIdxBits
-	letterIdxMax  = 63 / letterIdxBits   // # of letter indices fitting in 63 bits
-)
-var src = rand.NewSource(time.Now().UnixNano())
-
-func RandString(n int) string {
-	b := make([]byte, n)
-	// A src.Int63() generates 63 random bits, enough for letterIdxMax characters!
-	for i, cache, remain := n-1, src.Int63(), letterIdxMax; i >= 0; {
-		if remain == 0 {
-			cache, remain = src.Int63(), letterIdxMax
-		}
-		if idx := int(cache & letterIdxMask); idx < len(letterBytes) {
-			b[i] = letterBytes[idx]
-			i--
-		}
-		cache >>= letterIdxBits
-		remain--
-	}
-
-	return *(*string)(unsafe.Pointer(&b))
-}
