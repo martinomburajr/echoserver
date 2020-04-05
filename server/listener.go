@@ -16,17 +16,17 @@ type EchoListener struct {
 	Logger  *log.Logger
 }
 
-func (e* EchoListener) Setup() {
+func (e *EchoListener) Setup() {
 	if e.Name == "" {
 		e.Name = "listener"
 	}
-	prefixBuilder := utils.SetupLoggerPrefix(e.Name)
+	prefixBuilder, _ := utils.SetupLoggerPrefix(e.Name)
 	e.Logger.SetPrefix(prefixBuilder.String())
 
-	listener(e.ErrChan, e.Network, e.Address)
+	listener(e.ErrChan, e.Network, e.Address, e.Logger)
 }
 
-func (e* EchoListener) SetupLoggerPrefix() strings.Builder {
+func (e *EchoListener) SetupLoggerPrefix() strings.Builder {
 	dialerId := utils.RandString(5)
 	builder := strings.Builder{}
 	builder.WriteString("[")
@@ -37,25 +37,39 @@ func (e* EchoListener) SetupLoggerPrefix() strings.Builder {
 	return builder
 }
 
-func listener(errChan chan error, network, address string) {
+func listener(errChan chan error, network, address string, logger *log.Logger) {
+	logger.Printf("Listening on %s://%s ...", network, address)
 	listen, err := net.Listen(network, address)
 	if err != nil {
 		errChan <- err
-	}
-	for {
-		conn, err := listen.Accept()
-		log.Printf("[listener]\t - Accepted Connection at %s from %s", conn.LocalAddr(), conn.RemoteAddr())
-		go func() {
-			for {
+	} else {
+		for {
+			conn, err := listen.Accept()
+			logger.Printf("Accepted Connection at %s from %s", conn.LocalAddr(), conn.RemoteAddr())
+			go func(conn net.Conn, logger *log.Logger) {
+				logger.Printf("Reading from connection: %s", conn.RemoteAddr())
+				defer conn.Close()
+				for {
+					if err != nil {
+						errChan <- err
+						break
+					}
+					if conn == nil {
+						errChan <- err
+						break
+					}
+					connReader := bufio.NewReader(conn)
+					line, _, err := connReader.ReadLine()
+					if err != nil {
+						errChan <- err
+						break
+					}
 
-				if err != nil {
-					errChan <- err
+					logger.Printf("Read %s | %s", line, conn.RemoteAddr())
 				}
-				connReader := bufio.NewReader(conn)
-				line, _, _ := connReader.ReadLine()
-
-				log.Printf("[listener]\t - Read %s", line)
-			}
-		}()
+			}(conn, logger)
+			logger.Println("Listener exited 1")
+		}
+		logger.Println("Listener exited 2")
 	}
 }

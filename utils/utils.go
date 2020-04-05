@@ -35,13 +35,13 @@ func RandString(n int) string {
 	return *(*string)(unsafe.Pointer(&b))
 }
 
-func SetupLoggerPrefix(name string) strings.Builder {
-	dialerId := RandString(5)
-	builder := strings.Builder{}
+func SetupLoggerPrefix(name string) (builder strings.Builder, id string) {
+	id = RandString(5)
+	builder = strings.Builder{}
 	builder.WriteString("[")
 	builder.WriteString(name)
 	builder.WriteString("]:[")
-	builder.WriteString(dialerId)
+	builder.WriteString(id)
 	builder.WriteString("]\t - ")
-	return builder
+	return builder, id
 }

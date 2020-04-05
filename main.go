@@ -39,28 +39,28 @@ func cliParser() (dialer *server.EchoDialer, listener *server.EchoListener, err 
 	}
 	if *isListener && !*isDialer {
 		if *listenerAddress == "" {
-			return nil,nil, fmt.Errorf("parser error: listener address cannot be empty")
+			return nil, nil, fmt.Errorf("parser error: listener address cannot be empty")
 		}
 	}
 	if !*isListener && *isDialer {
 		if *dialerAddresses == "" {
-			return nil,nil, fmt.Errorf("parser error: dialer addresses cannot be empty, " +
+			return nil, nil, fmt.Errorf("parser error: dialer addresses cannot be empty, " +
 				"need at least one valid address e.g. 'localhost:8080', or multiple separated by comma 'localhost:8080," +
 				"127.0.0.2:7655'")
 		}
 	}
 	if *listenerAddress == "" && *dialerAddresses == "" {
-		return nil, nil,fmt.Errorf("parser error: listener and dialer addresses cannot be empty")
+		return nil, nil, fmt.Errorf("parser error: listener and dialer addresses cannot be empty")
 	}
 	if *dialInterval < 1 {
-		return nil, nil,fmt.Errorf("dialInterval must be greater than 1 and less than 60000")
+		return nil, nil, fmt.Errorf("dialInterval must be greater than 1 and less than 60000")
 	}
 	if *dialInterval > 60000 {
-		return nil,nil, fmt.Errorf("dialInterval must be greater than 1 and less than 60000")
+		return nil, nil, fmt.Errorf("dialInterval must be greater than 1 and less than 60000")
 	}
 
-	logger := log.New(os.Stdout, "", log.Lshortfile)
-	errChan := make(chan error, 10)
+	logger := log.New(os.Stdout, "", log.Lmsgprefix)
+	errChan := make(chan error, 10000)
 
 	if *isDialer {
 		splitDialerAddresses := strings.Split(*dialerAddresses, ",")
@@ -111,4 +111,3 @@ func main() {
 	}
 	<-doneChan
 }
-

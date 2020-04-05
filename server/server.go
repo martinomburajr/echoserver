@@ -9,4 +9,3 @@ type LoggerPrefix interface {
 type Setup interface {
 	Setup()
 }
-
